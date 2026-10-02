@@ -1,8 +1,10 @@
-from typing import Any, Dict, List, Optional
+import uuid
 from datetime import datetime
 from copy import deepcopy
-import uuid
+from typing import Any, Dict, List, Optional
 
+from app.models.gemini_flash import generate_outline
+from app.models.image_generator import generate_image
 
 class ComicService:
     """
@@ -212,7 +214,30 @@ class ComicService:
             "exports": []
         }
 
+          # Generate the comic storyboard using Gemini
+        outline = generate_outline(
+            prompt=prompt,
+            character=character,
+            setting=setting,
+            genre=genre,
+            mood=mood,
+            art_style=art_style,
+            language=language,
+            panel_count=panel_count
+        )
+
+        # Store Gemini's storyboard in the comic
+        # Store Gemini's storyboard in the comic
+        comic["storyboard"] = outline
+
+        # Save comic before parsing panels
         self.comics[comic_id] = comic
+
+        # Convert Gemini storyboard into structured panels
+        self._parse_storyboard(
+            comic_id,
+            outline
+        )
 
         return deepcopy(comic)
 
@@ -459,7 +484,123 @@ class ComicService:
         self._touch(comic)
 
         return deepcopy(panel)
+    # =========================================================
+    # GENERATE PANEL IMAGE
+    # =========================================================
 
+    def generate_panel_image(
+        self,
+        comic_id: str,
+        panel_number: int
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Generate an image for one comic panel.
+        """
+
+        # Check whether comic exists
+        if comic_id not in self.comics:
+            return None
+
+        comic = self.comics[comic_id]
+
+        # Find the requested panel
+        panel = None
+
+        for item in comic.get("panels", []):
+
+            if item.get("panel_number") == panel_number:
+                panel = item
+                break
+
+        if panel is None:
+            return None
+
+        # Get the image prompt created by Gemini
+        image_prompt = panel.get("image_prompt")
+
+        if not image_prompt:
+            raise ValueError(
+                f"Image prompt missing for panel {panel_number}"
+            )
+
+        # Create a unique image filename
+        filename = (
+            f"{comic_id}_panel_{panel_number}.png"
+        )
+
+        # Generate image using image_generator.py
+        image_path = generate_image(
+            prompt=image_prompt,
+            filename=filename
+        )
+
+        # Store generated image path
+        panel["image_path"] = image_path
+
+        # Update panel status
+        panel["status"] = "completed"
+
+        # Update comic timestamp
+        self._touch(comic)
+
+        return deepcopy(panel)
+    def _parse_storyboard(self, comic_id: str, storyboard: str):
+        """
+        Convert Gemini storyboard text into structured comic panels.
+        """
+
+        blocks = storyboard.split("\n\n")
+
+        for block in blocks:
+
+            lines = block.splitlines()
+
+            panel_number = None
+            title = ""
+            scene_description = ""
+            image_prompt = ""
+
+            for line in lines:
+
+                if line.startswith("Panel Number:"):
+                    panel_number = int(
+                        line.replace(
+                            "Panel Number:",
+                            ""
+                        ).strip()
+                    )
+
+                elif line.startswith("Title:"):
+                    title = line.replace(
+                        "Title:",
+                        ""
+                    ).strip()
+
+                elif line.startswith(
+                    "Scene Description:"
+                ):
+                    scene_description = line.replace(
+                        "Scene Description:",
+                        ""
+                    ).strip()
+
+                elif line.startswith(
+                    "Image Prompt:"
+                ):
+                    image_prompt = line.replace(
+                        "Image Prompt:",
+                        ""
+                    ).strip()
+
+            if panel_number is not None:
+
+                self.add_panel(
+                    comic_id=comic_id,
+                    panel_number=panel_number,
+                    title=title,
+                    scene_description=scene_description,
+                    image_prompt=image_prompt
+                )
     # =========================================================
     # UPDATE PANEL
     # =========================================================

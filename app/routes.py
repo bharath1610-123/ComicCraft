@@ -1,7 +1,9 @@
 from fastapi import APIRouter, HTTPException, Query
 from typing import Optional, Dict, Any
 
+from app.services.library_service import LibraryService
 from app.services.comic_service import comic_service
+from app.services.image_service import image_service
 
 
 # ============================================================
@@ -13,6 +15,8 @@ router = APIRouter(
     tags=["ComicCraft"]
 )
 
+library_service = LibraryService(comic_service)
+
 
 # ============================================================
 # HEALTH CHECK
@@ -20,9 +24,6 @@ router = APIRouter(
 
 @router.get("/health")
 def health_check():
-    """
-    Check whether the ComicCraft backend is running.
-    """
 
     return {
         "status": "healthy",
@@ -37,21 +38,6 @@ def health_check():
 
 @router.post("/comics")
 def create_comic(data: Dict[str, Any]):
-    """
-    Create a new comic.
-
-    Required:
-    - prompt
-    - character
-    - setting
-
-    Optional:
-    - genre
-    - mood
-    - art_style
-    - language
-    - panel_count
-    """
 
     try:
 
@@ -110,9 +96,14 @@ def create_comic(data: Dict[str, Any]):
 
     except Exception as error:
 
+        print(
+            "COMIC CREATION ERROR:",
+            repr(error)
+        )
+
         raise HTTPException(
             status_code=500,
-            detail="Failed to create comic"
+            detail=str(error)
         )
 
 
@@ -129,10 +120,20 @@ def get_comic(comic_id: str):
             comic_id
         )
 
+        if comic is None:
+
+            raise HTTPException(
+                status_code=404,
+                detail="Comic not found"
+            )
+
         return {
             "success": True,
             "comic": comic
         }
+
+    except HTTPException:
+        raise
 
     except ValueError as error:
 
@@ -201,7 +202,12 @@ def delete_comic(comic_id: str):
     except HTTPException:
         raise
 
-    except Exception:
+    except Exception as error:
+
+        print(
+            "DELETE COMIC ERROR:",
+            repr(error)
+        )
 
         raise HTTPException(
             status_code=500,
@@ -419,8 +425,7 @@ def regenerate_panel(
 
         return {
             "success": True,
-            "message":
-                "Panel regeneration requested",
+            "message": "Panel regeneration requested",
             "panel": panel
         }
 
@@ -428,6 +433,129 @@ def regenerate_panel(
 
         raise HTTPException(
             status_code=404,
+            detail=str(error)
+        )
+
+
+# ============================================================
+# GENERATE ONE PANEL IMAGE
+# ============================================================
+
+@router.post(
+    "/comics/{comic_id}/panels/{panel_number}/generate-image"
+)
+def generate_panel_image(
+    comic_id: str,
+    panel_number: int
+):
+
+    try:
+
+        result = image_service.generate_panel_image(
+
+            comic_id,
+
+            panel_number
+        )
+
+        return result
+
+    except ValueError as error:
+
+        raise HTTPException(
+            status_code=404,
+            detail=str(error)
+        )
+
+    except Exception as error:
+
+        print(
+            "IMAGE GENERATION ERROR:",
+            repr(error)
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(error)
+        )
+
+
+# ============================================================
+# GENERATE ALL PANEL IMAGES
+# ============================================================
+
+@router.post(
+    "/comics/{comic_id}/generate-images"
+)
+def generate_all_images(
+    comic_id: str
+):
+
+    try:
+
+        comic = comic_service.get_comic(
+            comic_id
+        )
+
+        if comic is None:
+
+            raise ValueError(
+                "Comic not found"
+            )
+
+        results = []
+
+        for panel in comic.get(
+            "panels",
+            []
+        ):
+
+            panel_number = panel.get(
+                "panel_number"
+            )
+
+            if panel_number is None:
+                continue
+
+            result = image_service.generate_panel_image(
+
+                comic_id,
+
+                panel_number
+            )
+
+            results.append(result)
+
+        return {
+
+            "success": True,
+
+            "message":
+                "All panel images generated successfully",
+
+            "count":
+                len(results),
+
+            "results":
+                results
+        }
+
+    except ValueError as error:
+
+        raise HTTPException(
+            status_code=404,
+            detail=str(error)
+        )
+
+    except Exception as error:
+
+        print(
+            "ALL IMAGE GENERATION ERROR:",
+            repr(error)
+        )
+
+        raise HTTPException(
+            status_code=500,
             detail=str(error)
         )
 
@@ -463,7 +591,8 @@ def improve_story(
             "success": True,
             "message":
                 "Story improvement requested",
-            "request": request
+            "request":
+                request
         }
 
     except ValueError as error:
@@ -500,7 +629,8 @@ def save_quality_report(
             "success": True,
             "message":
                 "Quality report saved",
-            "quality_report": result
+            "quality_report":
+                result
         }
 
     except ValueError as error:
@@ -540,7 +670,8 @@ def continue_story(
             "success": True,
             "message":
                 "Story continuation requested",
-            "request": request
+            "request":
+                request
         }
 
     except ValueError as error:
@@ -587,7 +718,8 @@ def create_branch(
             "success": True,
             "message":
                 "Story branch created",
-            "branch": branch
+            "branch":
+                branch
         }
 
     except ValueError as error:
@@ -622,7 +754,8 @@ def complete_comic(
             "success": True,
             "message":
                 "Comic completed",
-            "comic": comic
+            "comic":
+                comic
         }
 
     except ValueError as error:
@@ -634,7 +767,67 @@ def complete_comic(
 
 
 # ============================================================
-# LIBRARY
+# SAVE TO LIBRARY
+# ============================================================
+
+@router.post(
+    "/library/{comic_id}"
+)
+def save_to_library(
+    comic_id: str
+):
+
+    comic = library_service.save_comic(
+        comic_id
+    )
+
+    if comic is None:
+
+        raise HTTPException(
+            status_code=404,
+            detail="Comic not found"
+        )
+
+    return {
+        "success": True,
+        "message":
+            "Comic saved to library",
+        "comic":
+            comic
+    }
+
+
+# ============================================================
+# GET LIBRARY COMIC
+# ============================================================
+
+@router.get(
+    "/library/{comic_id}"
+)
+def get_library_comic(
+    comic_id: str
+):
+
+    comic = library_service.get_comic(
+        comic_id
+    )
+
+    if comic is None:
+
+        raise HTTPException(
+            status_code=404,
+            detail="Comic not found in library"
+        )
+
+    return {
+        "success": True,
+        "comic":
+            comic
+    }
+
+
+# ============================================================
+# SEARCH LIBRARY
 # ============================================================
 
 @router.get("/library")
@@ -658,7 +851,7 @@ def search_library(
 
     try:
 
-        comics = comic_service.search_library(
+        comics = library_service.search_library(
 
             keyword=keyword,
 
@@ -668,9 +861,14 @@ def search_library(
         )
 
         return {
+
             "success": True,
-            "count": len(comics),
-            "comics": comics
+
+            "count":
+                len(comics),
+
+            "comics":
+                comics
         }
 
     except ValueError as error:
@@ -702,8 +900,11 @@ def get_versions(
         )
 
         return {
+
             "success": True,
-            "versions": versions
+
+            "versions":
+                versions
         }
 
     except ValueError as error:
@@ -747,10 +948,14 @@ def register_export(
         )
 
         return {
+
             "success": True,
+
             "message":
                 "Export registered",
-            "export": export
+
+            "export":
+                export
         }
 
     except ValueError as error:
